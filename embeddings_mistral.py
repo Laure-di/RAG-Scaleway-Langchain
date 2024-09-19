@@ -113,29 +113,16 @@ if __name__ == "__main__":
     """)
     logger.debug("finish request")
     conn.commit()
-    # logger.debug("start loading documents")
-    # endpoint_s3 = "https://s3." + os.getenv("SCW_DEFAULT_REGION", "") + ".scw.cloud"
-    # document = S3DirectoryLoader(bucket=BUCKET_NAME, endpoint_url=endpoint_s3,
-    #                              aws_access_key_id=os.getenv("SCW_ACCESS_KEY", ""),
-    #                              aws_secret_access_key=os.getenv("SCW_SECRET_KEY", ""))
-    # files = document.load()
-    # logger.debug("finished loading documents")
-    # text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    # logger.debug("splitting in chunks")
-    # chunks = text_splitter.split_documents(files)
-    embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("SCW_API_KEY"), openai_api_base=os.getenv("ENDPOINT"), model="mistral/mistral-7b-instruct-v0.3:bf16")
-    # for chunk in chunks:
-    query_string = (
-        "PostgreSQL is my favorite database"
-    )
-    text2 = (
-        "LangGraph is a library for building stateful, multi-actor applications with LLMs"
-    )
-    if not query_string:
-        logger.debug("something is wrong with string")
-    else:
-        embed = embeddings.embed_documents([query_string, text2])
-        print(len(embed))  # Should be 1536, the dimensionality of OpenAI embeddings
-        print(embed[:5])
-    # cur.execute("INSERT INTO document_vectors (document_id, content, vector) VALUES (%s, %s, %s)", (chunk.metadata.get('id', 'unknown_id'), chunk.page_content, vector))
-    # conn.commit()
+    logger.debug("start loading documents")
+    endpoint_s3 = "https://s3." + os.getenv("SCW_DEFAULT_REGION", "") + ".scw.cloud"
+    document = S3DirectoryLoader(bucket=BUCKET_NAME, endpoint_url=endpoint_s3,
+                                 aws_access_key_id=os.getenv("SCW_ACCESS_KEY", ""),
+                                 aws_secret_access_key=os.getenv("SCW_SECRET_KEY", ""))
+    files = document.load()
+    logger.debug("finished loading documents")
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    logger.debug("splitting in chunks")
+    chunks = text_splitter.split_documents(files)
+    embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("SCW_API_KEY"), openai_api_base=os.getenv("ENDPOINT"), model="mistral-7b-instruct-v0.3")
+    embed = embeddings.embed_documents([chunk.page_content for chunk in chunks])
+
