@@ -9,10 +9,8 @@ from scaleway.inference.v1beta1.types import EndpointSpec
 from scaleway.inference.v1beta1.types import EndpointSpecPublic
 from scaleway.rdb.v1.api import RdbV1API
 from dotenv import load_dotenv
-from langchain_community.document_loaders import S3DirectoryLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
-from sqlalchemy.testing.plugin.plugin_base import engines
+
 
 MODEL_NAME = "mistral/mistral-7b-instruct-v0.3:bf16"
 NODE_TYPE = "L4"
@@ -113,16 +111,19 @@ if __name__ == "__main__":
     """)
     logger.debug("finish request")
     conn.commit()
-    logger.debug("start loading documents")
-    endpoint_s3 = "https://s3." + os.getenv("SCW_DEFAULT_REGION", "") + ".scw.cloud"
-    document = S3DirectoryLoader(bucket=BUCKET_NAME, endpoint_url=endpoint_s3,
-                                 aws_access_key_id=os.getenv("SCW_ACCESS_KEY", ""),
-                                 aws_secret_access_key=os.getenv("SCW_SECRET_KEY", ""))
-    files = document.load()
-    logger.debug("finished loading documents")
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    logger.debug("splitting in chunks")
-    chunks = text_splitter.split_documents(files)
     embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("SCW_API_KEY"), openai_api_base=os.getenv("ENDPOINT"), model="mistral-7b-instruct-v0.3")
-    embed = embeddings.embed_documents([chunk.page_content for chunk in chunks])
+    physics_template = """You are a very smart physics professor. \
+    You are great at answering questions about physics in a concise and easy to understand manner. \
+    When you don't know the answer to a question you admit that you don't know.
 
+    Here is a question:
+    {query}"""
+
+    math_template = """You are a very good mathematician. You are great at answering math questions. \
+    You are so good because you are able to break down hard problems into their component parts, \
+    answer the component parts, and then put them together to answer the broader question.
+
+    Here is a question:
+    {query}"""
+
+    embed = embeddings.embed_documents([physics_template, math_template])
