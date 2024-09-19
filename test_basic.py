@@ -1,15 +1,18 @@
 import logging
 import os
 
-
 import psycopg2
+from openai import base_url
 from scaleway import Client
 from scaleway.inference.v1beta1.api import InferenceV1Beta1API
 from scaleway.inference.v1beta1.types import EndpointSpec
 from scaleway.inference.v1beta1.types import EndpointSpecPublic
 from scaleway.rdb.v1.api import RdbV1API
 from dotenv import load_dotenv
-from langchain_openai import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_postgres.vectorstores import PGVector
+from IPython.display import Markdown, display
+from langchain.chains import RetrievalQA
 
 MODEL_NAME = "mistral/mistral-7b-instruct-v0.3:bf16"
 NODE_TYPE = "L4"
@@ -94,7 +97,6 @@ if __name__ == "__main__":
         instance_db = db_api.create_instance(engine="PostgreSQL-15", user_name="laure-di", password=os.getenv("SCW_DB_PASSWORD"), node_type="db-play2-nano", region="fr-par", is_ha_cluster=False,disable_backup=True, volume_size=10000000000, volume_type="bssd", backup_same_region=False, name=INSTANCE_NAME)
         db_api.wait_for_instance(instance_id=instance_db.id)
         db = db_api.create_database(instance_id=instance_db.id, name=DB_NAME)
-
     else:
         instance_db = instance_by_name()
         db = db_by_instance(instance_db.id)
@@ -117,13 +119,66 @@ if __name__ == "__main__":
             vector VECTOR(1536)  -- Adjust the dimension based on your embeddings
         );
     """)
+    connection_string = "postgresql+psycopg2://"+ conn.info.user +":"+ conn.info.password +"@"+ conn.info.host +":"+ str(conn.info.port) +"/"+ conn.info.dbname
     logger.debug("finish request")
     conn.commit()
+    os.environ['TOKENIZERS_PARALLELISM'] = 'false'
     embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("SCW_API_KEY_EMBED"),
                                   openai_api_base=os.getenv("ENDPOINT_EMBED"),
-                                  model=MODEL_NAME_EMBED)
+                                  model="sentence-transformers/sentence-t5-xxl",
+                                  tiktoken_enabled=False)
     sentence1 = "The integration of machine learning algorithms into everyday technology has not only enhanced automation but also opened up new possibilities for predictive analytics, enabling businesses to make data-driven decisions with greater accuracy and efficiency."
 
-    math_template = "As natural language processing techniques continue to evolve, the ability for machines to comprehend context, semantics, and intent in human communication is becoming increasingly sophisticated, paving the way for more advanced conversational agents and AI-driven customer support systems."
+    sentence2 = "As natural language processing techniques continue to evolve, the ability for machines to comprehend context, semantics, and intent in human communication is becoming increasingly sophisticated, paving the way for more advanced conversational agents and AI-driven customer support systems."
 
-    embed = embeddings.embed_documents([sentence1, math_template])
+    sentence3 = "Laure Masson is awesome dev in devtools team"
+
+    content = [sentence1, sentence2, sentence3]
+    print(connection_string)
+    vector_store = PGVector(
+        connection=connection_string,
+        embeddings=embeddings,
+    )
+    try:
+        embed = embeddings.embed_documents(content)
+        logging.debug("finish embedding documents")
+        logging.debug("store embeddings")
+        vector_store.add_embeddings(content, embed)
+        logging.debug("finish adding embeddings")
+    except Exception as e:
+        logging.error(f"An error occurred: {e}")
+
+    retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+
+    retriever_answer = retriever.invoke("Who is Laure")
+    print(retriever_answer)
+
+    base_url = deployment.endpoints[0].url + "/v1"
+    print(base_url)
+    llm = ChatOpenAI(
+        base_url= base_url,
+        api_key=os.getenv("SCW_API_KEY"),
+        model="mistral/mistral-7b-instruct-v0.3:bf16",
+        temperature=0.0,
+    )
+
+    qa_stuff = RetrievalQA.from_chain_type(
+        llm=llm,
+        chain_type="stuff",
+        retriever=retriever,
+        verbose=True,
+    )
+
+    query = "Can you tell me who works in devtool team?"
+
+    response = qa_stuff.run(query)
+
+    print(response)
+
+    display(Markdown(response))
+
+
+
+
+
+
