@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from langchain_community.document_loaders import S3DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
-from sqlalchemy.testing.plugin.plugin_base import engines
+
 
 MODEL_NAME = "mistral/mistral-7b-instruct-v0.3:bf16"
 NODE_TYPE = "L4"
@@ -21,6 +21,8 @@ DEPLOYMENT_NAME = "RAG"
 INSTANCE_NAME = "RAG-instance"
 DB_NAME = "DB_RAG"
 DB_USER = "laure-di"
+MODEL_NAME_EMBED="sentence-transformers/sentence-t5-xxl:fp32"
+DEPLOYMENT_NAME_EMBED= "RAG-embeddings"
 
 logger = logging.getLogger('scaleway')
 logger.addHandler(logging.StreamHandler())
@@ -28,12 +30,12 @@ logger.setLevel(logging.DEBUG)
 
 load_dotenv()
 
-def deployment_exists():
+def deployment_exists(deployment_name):
     deployments = inference_api.list_deployments()
     if deployments.total_count == 0:
         return False
     for deployment_inference in deployments.deployments:
-        if deployment_inference.name == DEPLOYMENT_NAME:
+        if deployment_inference.name == deployment_name:
             return True
     return False
 
@@ -52,7 +54,7 @@ def deployment_by_name(deployment_name):
         if deployment_inference.name == deployment_name:
             return deployment_inference
 
-def instance_by_name(image_name):
+def instance_by_name():
     instances = db_api.list_instances()
     for instance in instances.instances:
         if instance.name == INSTANCE_NAME:
@@ -75,12 +77,19 @@ if __name__ == "__main__":
         private_network=None,
     )
     project_id = os.getenv("SCW_DEFAULT_PROJECT_ID", "")
-    exist = deployment_exists()
+    exist = deployment_exists(DEPLOYMENT_NAME)
     if not exist:
         deployment = inference_api.create_deployment(model_name=MODEL_NAME, node_type=NODE_TYPE, endpoints=[endpoint],
                                                  project_id=project_id, name=DEPLOYMENT_NAME)
     else:
         deployment = deployment_by_name(DEPLOYMENT_NAME)
+
+    exist = deployment_exists(DEPLOYMENT_NAME_EMBED)
+    if not exist:
+        deployment = inference_api.create_deployment(model_name=MODEL_NAME_EMBED, node_type=NODE_TYPE, endpoints=[endpoint],
+                                                     project_id=project_id, name=DEPLOYMENT_NAME_EMBED)
+    else:
+        deployment = deployment_by_name(DEPLOYMENT_NAME_EMBED)
 
 
     instance_exist = instance_exists()
@@ -123,6 +132,9 @@ if __name__ == "__main__":
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     logger.debug("splitting in chunks")
     chunks = text_splitter.split_documents(files)
-    embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("SCW_API_KEY"), openai_api_base=os.getenv("ENDPOINT"), model="mistral-7b-instruct-v0.3")
+    embeddings = OpenAIEmbeddings(
+        openai_api_key=os.getenv("SCW_API_KEY"),
+        openai_api_base=os.getenv("ENDPOINT"),
+        model="mistral-7b-instruct-v0.3")
     embed = embeddings.embed_documents([chunk.page_content for chunk in chunks])
 
