@@ -11,7 +11,6 @@ from scaleway.rdb.v1.api import RdbV1API
 from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings
 
-
 MODEL_NAME = "mistral/mistral-7b-instruct-v0.3:bf16"
 NODE_TYPE = "L4"
 BUCKET_NAME = "cli-test"
@@ -19,6 +18,8 @@ DEPLOYMENT_NAME = "RAG"
 INSTANCE_NAME = "RAG-instance"
 DB_NAME = "DB_RAG"
 DB_USER = "laure-di"
+MODEL_NAME_EMBED="sentence-transformers/sentence-t5-xxl:fp32"
+DEPLOYMENT_NAME_EMBED= "RAG-embeddings"
 
 logger = logging.getLogger('scaleway')
 logger.addHandler(logging.StreamHandler())
@@ -26,12 +27,12 @@ logger.setLevel(logging.DEBUG)
 
 load_dotenv()
 
-def deployment_exists():
+def deployment_exists(deployment_name):
     deployments = inference_api.list_deployments()
     if deployments.total_count == 0:
         return False
     for deployment_inference in deployments.deployments:
-        if deployment_inference.name == DEPLOYMENT_NAME:
+        if deployment_inference.name == deployment_name:
             return True
     return False
 
@@ -50,7 +51,7 @@ def deployment_by_name(deployment_name):
         if deployment_inference.name == deployment_name:
             return deployment_inference
 
-def instance_by_name(image_name):
+def instance_by_name():
     instances = db_api.list_instances()
     for instance in instances.instances:
         if instance.name == INSTANCE_NAME:
@@ -73,12 +74,19 @@ if __name__ == "__main__":
         private_network=None,
     )
     project_id = os.getenv("SCW_DEFAULT_PROJECT_ID", "")
-    exist = deployment_exists()
+    exist = deployment_exists(DEPLOYMENT_NAME)
     if not exist:
         deployment = inference_api.create_deployment(model_name=MODEL_NAME, node_type=NODE_TYPE, endpoints=[endpoint],
                                                  project_id=project_id, name=DEPLOYMENT_NAME)
     else:
         deployment = deployment_by_name(DEPLOYMENT_NAME)
+
+    exist = deployment_exists(DEPLOYMENT_NAME_EMBED)
+    if not exist:
+        deployment_embed = inference_api.create_deployment(model_name=MODEL_NAME_EMBED, node_type=NODE_TYPE, endpoints=[endpoint],
+                                                     project_id=project_id, name=DEPLOYMENT_NAME_EMBED)
+    else:
+        deployment_embed = deployment_by_name(DEPLOYMENT_NAME)
 
 
     instance_exist = instance_exists()
@@ -88,7 +96,7 @@ if __name__ == "__main__":
         db = db_api.create_database(instance_id=instance_db.id, name=DB_NAME)
 
     else:
-        instance_db = instance_by_name(INSTANCE_NAME)
+        instance_db = instance_by_name()
         db = db_by_instance(instance_db.id)
     logger.debug("start trying to connect to database")
     conn = psycopg2.connect(
@@ -111,19 +119,11 @@ if __name__ == "__main__":
     """)
     logger.debug("finish request")
     conn.commit()
-    embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("SCW_API_KEY"), openai_api_base=os.getenv("ENDPOINT"), model="mistral-7b-instruct-v0.3")
-    physics_template = """You are a very smart physics professor. \
-    You are great at answering questions about physics in a concise and easy to understand manner. \
-    When you don't know the answer to a question you admit that you don't know.
+    embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("SCW_API_KEY_EMBED"),
+                                  openai_api_base=os.getenv("ENDPOINT_EMBED"),
+                                  model=MODEL_NAME_EMBED)
+    sentence1 = "The integration of machine learning algorithms into everyday technology has not only enhanced automation but also opened up new possibilities for predictive analytics, enabling businesses to make data-driven decisions with greater accuracy and efficiency."
 
-    Here is a question:
-    {query}"""
+    math_template = "As natural language processing techniques continue to evolve, the ability for machines to comprehend context, semantics, and intent in human communication is becoming increasingly sophisticated, paving the way for more advanced conversational agents and AI-driven customer support systems."
 
-    math_template = """You are a very good mathematician. You are great at answering math questions. \
-    You are so good because you are able to break down hard problems into their component parts, \
-    answer the component parts, and then put them together to answer the broader question.
-
-    Here is a question:
-    {query}"""
-
-    embed = embeddings.embed_documents([physics_template, math_template])
+    embed = embeddings.embed_documents([sentence1, math_template])
