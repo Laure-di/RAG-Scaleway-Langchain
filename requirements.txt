@@ -1,7 +1,0 @@
-scaleway==2.6.0
-langchain_community==0.2.15
-boto3==1.35.10
-python-dotenv==1.0.1
-psycopg2==2.9.9
-unstructured==0.15.12
-langchain_openai==0.1.24
