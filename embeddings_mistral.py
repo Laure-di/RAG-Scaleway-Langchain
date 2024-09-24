@@ -153,10 +153,13 @@ if __name__ == "__main__":
         cur.execute("SELECT object_key FROM object_loaded WHERE object_key = %s", (file.metadata["source"],))
         if cur.fetchone() is None:
             logger.debug("start loading files because it doesn't exist in db")
-            fileLoader = S3FileLoader(bucket=BUCKET_NAME, key=file.metadata["source"] ,endpoint_url=endpoint_s3,
+
+            key_file = file.metadata["source"].split("/")[-1]
+            fileLoader = S3FileLoader(bucket=BUCKET_NAME, key=key_file ,endpoint_url=endpoint_s3,
                                       aws_access_key_id=os.getenv("SCW_ACCESS_KEY", ""),
                                       aws_secret_access_key=os.getenv("SCW_SECRET_KEY", ""))
             file_to_load = fileLoader.load()
+            print(file_to_load)
             cur.execute("INSERT INTO object_loaded (object_key) VALUES (%s)", (file.metadata["source"],))
             chunks = text_splitter.split_text(file.page_content)
             try:
