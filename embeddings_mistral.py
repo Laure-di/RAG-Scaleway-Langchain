@@ -1,9 +1,8 @@
 import argparse
 import logging
 import os
-import time
-from datetime import timezone
 
+import time
 import boto3
 import psycopg2
 from langchain import hub
@@ -74,6 +73,7 @@ def db_by_instance(instance_id, db_api):
             return database
 
 
+
 def chat(new_message: str):
     client = Client.from_config_file_and_env("/Users/lmasson/.config/scw/config.yaml", "public")
     inference_api = InferenceV1Beta1API(client)
@@ -128,6 +128,7 @@ def chat(new_message: str):
         db_api.set_privilege(instance_id=instance_db.id, database_name=DB_NAME, user_name=DB_USER,
                              permission=Permission.ALL)
     else:
+
         instance_db = instance_by_name(db_api)
         db = db_by_instance(instance_db.id, db_api)
 
@@ -197,6 +198,7 @@ def chat(new_message: str):
                                     (obj['Key'], obj['LastModified']))
                 except Exception as e:
                     logger.error(f"An error occurred: {e}")
+
 
     conn.commit()
 
@@ -275,3 +277,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
