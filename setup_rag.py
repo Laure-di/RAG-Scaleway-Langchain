@@ -101,13 +101,13 @@ def setup_rag():
             name=INSTANCE_NAME
         )
         instance_db = db_api.wait_for_instance(instance_id=instance_db.id)
-        db = db_api.create_database(instance_id=instance_db.id, name=DB_NAME)
+        db_api.create_database(instance_id=instance_db.id, name=DB_NAME)
         db_api.set_privilege(instance_id=instance_db.id, database_name=DB_NAME, user_name=DB_USER,
                              permission=Permission.ALL)
     else:
         instance_db = instance_by_name(db_api)
-        db = db_by_instance(instance_db.id, db_api)
-    # logger.debug("Start trying to connect to database")
+        db_by_instance(instance_db.id, db_api)
+
     conn = psycopg2.connect(
         database=DB_NAME,
         user=DB_USER,
