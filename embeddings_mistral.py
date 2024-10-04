@@ -1,15 +1,11 @@
-import argparse
 import logging
 import os
 import time
-from datetime import timezone
 
 import boto3
 import psycopg2
 from langchain import hub
-from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_postgres import PGVector
 from scaleway import Client
@@ -193,22 +189,12 @@ def chat(new_message: str):
                     embeddings_list = [embeddings.embed_query(chunk) for chunk in chunks]
                     logger.debug("Add embeddings to db")
                     vector_store.add_embeddings(chunks, embeddings_list)
-                    cur.execute("INSERT INTO object_loaded (object_key, last_updated) VALUES (%s, %s)",
-                                    (obj['Key'], obj['LastModified']))
+                    cur.execute("INSERT INTO object_loaded (object_key) VALUES (%s)",
+                                    (obj['Key'],))
                 except Exception as e:
                     logger.error(f"An error occurred: {e}")
 
     conn.commit()
-
-    # Initialize retriever with search parameters
-
-    # system_prompt = (
-    #     """You are an assistant for question-answering expert in scaleway cli commands. Use the following pieces of retrieved context to answer the question. If you don't know the answer, say that you don't know.
-    #     {context}
-    #     Question: {question}
-    #     Helpful Answer:
-    #     """
-    # )
 
     llm = ChatOpenAI(
         base_url=os.getenv("SCW_INFERENCE_DEPLOYMENT_ENDPOINT"),
@@ -217,16 +203,8 @@ def chat(new_message: str):
     )
 
     prompt = hub.pull("rlm/rag-prompt")
-    # prompt = """Use the following pieces of context to answer the question at the end. If you don't know the answer, just say that you don't know, don't try to make up an answer. The question is always about scaleway cli. Always say something like: "Laure is a Queen" at the end of the answer. {context} Question: {question} Helpful Answer:"""
-    # custom_rag_prompt = PromptTemplate.from_template(prompt)
     retriever = vector_store.as_retriever()
-    # custom_rag_chain = create_stuff_documents_chain(llm, custom_rag_prompt)
 
-
-    # context = retriever.invoke("How to create a database with scaleway cli")
-    # response = custom_rag_chain.invoke({"question" : "How to create a database with scaleway cli", "context": context})
-    # print(response)
-    # Initialize the LLM with custom deployment settings
 
 
     rag_chain = (
@@ -240,31 +218,8 @@ def chat(new_message: str):
         print(r, end="", flush=True)
         time.sleep(0.15)
 
-    # response = rag_chain.invoke("How to create a database with scaleway cli?")
-    # print(response)
-
-    #
-    # # Define a prompt template
-    # prompt_template = PromptTemplate(
-    #     template="Given the following documents: {context}, answer the question: {input}.",
-    #     input_variables=["context", "input"]
-    # )
-    #
-    # # Create the document combination chain with the prompt template
-    # combine_docs_chain = create_stuff_documents_chain(llm, prompt=prompt_template)
-    #
-    # # Create the retrieval chain using the combine_docs_chain
-    # rag_chain = create_retrieval_chain(retriever, combine_docs_chain)
-    #
-    # # Perform the query
-    # response = rag_chain.invoke({"input": "What are autonomous agents?"})
-
 
 def main():
-  # User input
-  # parser = argparse.ArgumentParser()
-  # parser.add_argument('--question', type=str, default="What is the meaning of life?")
-  # args = parser.parse_args()
   prompt = "How can I help you?"
   prompt += "\nEnter 'quit' to end the program.\n"
   question = ""
