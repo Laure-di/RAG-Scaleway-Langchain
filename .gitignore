@@ -1,0 +1,9 @@
+.env
+pyvenv.cfg
+.idea
+new_env
+myenv
+share
+include
+bin
+lib
