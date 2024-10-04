@@ -1,27 +1,16 @@
-import argparse
-import logging
 import os
 
-import time
 import boto3
 import psycopg2
-from langchain import hub
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import PromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from langchain_postgres import PGVector
-from scaleway import Client
-from scaleway.inference.v1beta1.api import InferenceV1Beta1API
-from scaleway.inference.v1beta1.types import EndpointSpec, EndpointSpecPublic
-from scaleway.rdb.v1.api import RdbV1API
-from scaleway.rdb.v1.types import Permission
 from dotenv import load_dotenv
-from langchain_community.document_loaders import S3DirectoryLoader, S3FileLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_community.document_loaders import S3FileLoader
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_postgres import PGVector
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from scaleway.inference.v1beta1 import InferenceV1Beta1API, EndpointSpecPublic, EndpointSpec
+from scaleway.rdb.v1 import RdbV1API, Permission
+from scaleway_core.client import Client
 
-# Constants
 MODEL_NAME = "mistral/mistral-7b-instruct-v0.3:bf16"
 NODE_TYPE = "L4"
 BUCKET_NAME = "rag-test"
@@ -32,16 +21,10 @@ DB_USER = "laure-di"
 MODEL_NAME_EMBED = "sentence-transformers/sentence-t5-xxl:fp32"
 DEPLOYMENT_NAME_EMBED = "RAG-embeddings"
 
-# Configure logging
-logger = logging.getLogger('scaleway')
-logger.addHandler(logging.StreamHandler())
-logger.setLevel(logging.DEBUG)
-
 # Load environment variables
 load_dotenv()
 
 
-# Functions to check the existence of deployments and instances
 def deployment_exists(deployment_name, inference_api):
     deployments = inference_api.list_deployments()
     return any(deployment.name == deployment_name for deployment in deployments.deployments)
@@ -73,17 +56,13 @@ def db_by_instance(instance_id, db_api):
             return database
 
 
-
-def chat(new_message: str):
+def setup_rag():
     client = Client.from_config_file_and_env("/Users/lmasson/.config/scw/config.yaml", "public")
     inference_api = InferenceV1Beta1API(client)
     db_api = RdbV1API(client)
-
     public_endpoint = EndpointSpecPublic()
     endpoint = EndpointSpec(disable_auth=False, public=public_endpoint, private_network=None)
-
     project_id = os.getenv("SCW_DEFAULT_PROJECT_ID", "")
-
     # Deployment for LLM
     if not deployment_exists(DEPLOYMENT_NAME, inference_api):
         deployment = inference_api.create_deployment(
@@ -95,7 +74,6 @@ def chat(new_message: str):
         )
     else:
         deployment = deployment_by_name(DEPLOYMENT_NAME, inference_api)
-
     # Deployment for embeddings
     if not deployment_exists(DEPLOYMENT_NAME_EMBED, inference_api):
         deployment_embeddings = inference_api.create_deployment(
@@ -107,8 +85,7 @@ def chat(new_message: str):
         )
     else:
         deployment_embeddings = deployment_by_name(DEPLOYMENT_NAME_EMBED, inference_api)
-
-    logger.debug("Create or get DB")
+    # logger.debug("Create or get DB")
     if not instance_exists(db_api):
         instance_db = db_api.create_instance(
             engine="PostgreSQL-15",
@@ -128,11 +105,9 @@ def chat(new_message: str):
         db_api.set_privilege(instance_id=instance_db.id, database_name=DB_NAME, user_name=DB_USER,
                              permission=Permission.ALL)
     else:
-
         instance_db = instance_by_name(db_api)
         db = db_by_instance(instance_db.id, db_api)
-
-    logger.debug("Start trying to connect to database")
+    # logger.debug("Start trying to connect to database")
     conn = psycopg2.connect(
         database=DB_NAME,
         user=DB_USER,
@@ -141,16 +116,10 @@ def chat(new_message: str):
         port=instance_db.endpoint.port
     )
     cur = conn.cursor()
-    logger.debug("Connected to database")
-
-    logger.debug("Install pg_vector extension")
     cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
     conn.commit()
-
-    logger.debug("Create table object_key")
     cur.execute("CREATE TABLE IF NOT EXISTS object_loaded (id SERIAL PRIMARY KEY, object_key TEXT)")
     conn.commit()
-
     embedding_url = deployment_embeddings.endpoints[0].url + "/v1"
     embeddings = OpenAIEmbeddings(
         openai_api_key=os.getenv("SCW_SECRET_KEY"),
@@ -158,7 +127,6 @@ def chat(new_message: str):
         model="sentence-transformers/sentence-t5-xxl",
         tiktoken_enabled=False,
     )
-
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
     connection_string = f"postgresql+psycopg2://{conn.info.user}:{conn.info.password}@{conn.info.host}:{conn.info.port}/{conn.info.dbname}"
     vector_store = PGVector(
@@ -172,13 +140,14 @@ def chat(new_message: str):
                                aws_secret_access_key=os.getenv("SCW_SECRET_KEY", ""))
     paginator = client_s3.get_paginator('list_objects_v2')
     page_iterator = paginator.paginate(Bucket=BUCKET_NAME)
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=0, add_start_index=True, length_function=len, is_separator_regex=False)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=0, add_start_index=True,
+                                                   length_function=len, is_separator_regex=False)
     for page in page_iterator:
         for obj in page.get('Contents', []):
             cur.execute("SELECT object_key FROM object_loaded WHERE object_key = %s", (obj['Key'],))
             response = cur.fetchone()
             if response is None:
-                logger.debug("Start loading files because it doesn't exist in db")
+                # logger.debug("Start loading files because it doesn't exist in db")
                 file_loader = S3FileLoader(
                     bucket=BUCKET_NAME,
                     key=obj['Key'],
@@ -190,91 +159,21 @@ def chat(new_message: str):
                 cur.execute("INSERT INTO object_loaded (object_key) VALUES (%s)", (obj['Key'],))
                 chunks = text_splitter.split_text(file_to_load[0].page_content)
                 try:
-                    logger.debug("Start embedding chunks")
                     embeddings_list = [embeddings.embed_query(chunk) for chunk in chunks]
-                    logger.debug("Add embeddings to db")
                     vector_store.add_embeddings(chunks, embeddings_list)
-                    cur.execute("INSERT INTO object_loaded (object_key, last_updated) VALUES (%s, %s)",
-                                    (obj['Key'], obj['LastModified']))
+                    cur.execute("INSERT INTO object_loaded (object_key) VALUES (%s)",
+                                (obj['Key'],))
                 except Exception as e:
-                    logger.error(f"An error occurred: {e}")
-
-
+                    print(e)
     conn.commit()
-
-    # Initialize retriever with search parameters
-
-    # system_prompt = (
-    #     """You are an assistant for question-answering expert in scaleway cli commands. Use the following pieces of retrieved context to answer the question. If you don't know the answer, say that you don't know.
-    #     {context}
-    #     Question: {question}
-    #     Helpful Answer:
-    #     """
-    # )
-
     llm = ChatOpenAI(
         base_url=os.getenv("SCW_INFERENCE_DEPLOYMENT_ENDPOINT"),
         api_key=os.getenv("SCW_SECRET_KEY"),
         model=deployment.model_name,
     )
-
-    prompt = hub.pull("rlm/rag-prompt")
-    # prompt = """Use the following pieces of context to answer the question at the end. If you don't know the answer, just say that you don't know, don't try to make up an answer. The question is always about scaleway cli. Always say something like: "Laure is a Queen" at the end of the answer. {context} Question: {question} Helpful Answer:"""
-    # custom_rag_prompt = PromptTemplate.from_template(prompt)
-    retriever = vector_store.as_retriever()
-    # custom_rag_chain = create_stuff_documents_chain(llm, custom_rag_prompt)
+    return deployment, vector_store, llm
 
 
-    # context = retriever.invoke("How to create a database with scaleway cli")
-    # response = custom_rag_chain.invoke({"question" : "How to create a database with scaleway cli", "context": context})
-    # print(response)
-    # Initialize the LLM with custom deployment settings
 
 
-    rag_chain = (
-        {"context": retriever, "question": RunnablePassthrough()}
-        | prompt
-        | llm
-        | StrOutputParser()
-    )
-
-    for r in rag_chain.stream(new_message):
-        print(r, end="", flush=True)
-        time.sleep(0.15)
-
-    # response = rag_chain.invoke("How to create a database with scaleway cli?")
-    # print(response)
-
-    #
-    # # Define a prompt template
-    # prompt_template = PromptTemplate(
-    #     template="Given the following documents: {context}, answer the question: {input}.",
-    #     input_variables=["context", "input"]
-    # )
-    #
-    # # Create the document combination chain with the prompt template
-    # combine_docs_chain = create_stuff_documents_chain(llm, prompt=prompt_template)
-    #
-    # # Create the retrieval chain using the combine_docs_chain
-    # rag_chain = create_retrieval_chain(retriever, combine_docs_chain)
-    #
-    # # Perform the query
-    # response = rag_chain.invoke({"input": "What are autonomous agents?"})
-
-
-def main():
-  # User input
-  # parser = argparse.ArgumentParser()
-  # parser.add_argument('--question', type=str, default="What is the meaning of life?")
-  # args = parser.parse_args()
-  prompt = "How can I help you?"
-  prompt += "\nEnter 'quit' to end the program.\n"
-  question = ""
-  while question != 'quit':
-    question = input(prompt)
-    if question != 'quit':
-        chat(question)
-
-if __name__ == '__main__':
-    main()
 
